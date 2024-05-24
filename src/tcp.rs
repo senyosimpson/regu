@@ -10,16 +10,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tower::Service;
 
+use crate::error::ProxyError;
 use crate::request::Request;
 
 pub struct TcpService;
-
-#[derive(Debug)]
-pub enum ProxyError {
-    Timeout,
-    Connection,
-    Http(http::Error),
-}
 
 impl Service<Request> for TcpService {
     // TODO: In future, use a hyper Bytes? or use another generic that
@@ -37,12 +31,6 @@ impl Service<Request> for TcpService {
     // moves from there
     fn call(&mut self, req: Request) -> Self::Future {
         let fut = async move {
-            // Okay, so we actually want to make a request to an upstream server, which we'll
-            // get from the request
-
-            // Make a tcp connection. For now, we're acting like the backends are all for the
-            // same application
-            // only connect on 443 for now
             let ctx = req.context.lock().await;
             let origin_addr = ctx.origin;
             drop(ctx);

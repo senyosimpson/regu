@@ -1,32 +1,34 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tower::{Service, ServiceBuilder};
 
 use crate::balance::BalanceLayer;
+use crate::http::HttpService;
 use crate::tcp::TcpService;
 
 /// The Regu TCP + HTTP proxy
 pub struct Regu {
-    store: Store,
+    store: Arc<Store>,
 }
 
 pub struct Store {
-    apps: HashMap<IpAddr, Target>,
+    pub apps: HashMap<IpAddr, Target>,
 }
 
 #[derive(Debug)]
 pub struct Target {
-    protocol: Protocol,
-    origins: Vec<Origin>,
+    pub protocol: Protocol,
+    pub origins: Vec<Origin>,
 }
 
 #[derive(Debug)]
 pub struct Origin {
-    addr: SocketAddr,
-    rtt: Duration,
+    pub addr: SocketAddr,
+    pub rtt: Duration,
 }
 
 #[derive(Debug)]
@@ -63,7 +65,9 @@ impl Regu {
         apps.insert(ip, target);
 
         let store = Store { apps };
-        Regu { store }
+        Regu {
+            store: Arc::new(store),
+        }
     }
 
     pub async fn run(&self) {
@@ -81,17 +85,28 @@ impl Regu {
                 }
             };
 
+            let store = self.store.clone();
             match target.protocol {
                 Protocol::Tcp => {
                     tokio::spawn(async move {
                         let mut service = ServiceBuilder::new()
-                            .layer(BalanceLayer)
+                            .layer(BalanceLayer::new(store))
                             .service(TcpService);
 
-                        service.call(stream).await;
+                        service.call((stream, addr)).await;
+                        println!("serviced connection");
                     });
                 }
-                Protocol::Http11 => unreachable!(),
+                Protocol::Http11 => {
+                    tokio::spawn(async move {
+                        let mut service = ServiceBuilder::new()
+                            .layer(BalanceLayer::new(store))
+                            .service(HttpService);
+
+                        service.call((stream, addr)).await;
+                        println!("serviced connection");
+                    });
+                }
                 Protocol::Http2 => unreachable!(),
             }
         }

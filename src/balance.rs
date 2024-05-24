@@ -2,19 +2,26 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use rand::rngs::SmallRng;
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tower::{Layer, Service};
 
+use crate::regu::Store;
 use crate::request::{self, Request};
 
 pub struct Balance<S> {
     inner: S,
+    store: Arc<Store>,
 }
 
-pub struct BalanceLayer;
+pub struct BalanceLayer {
+    store: Arc<Store>,
+}
 
-impl<S> Service<TcpStream> for Balance<S>
+impl<S> Service<(TcpStream, SocketAddr)> for Balance<S>
 where
     S: Service<Request>,
 {
@@ -26,14 +33,26 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, client: TcpStream) -> Self::Future {
-        let addr = "127.0.0.2:4096".parse().unwrap();
+    fn call(&mut self, request: (TcpStream, SocketAddr)) -> Self::Future {
+        let (client, addr) = request;
+        let target = self.store.apps.get(&addr.ip()).unwrap();
+        let mut rng = SmallRng::from_entropy();
+        let origin = target.origins.choose(&mut rng).unwrap();
+
         let request = Request {
             client,
-            context: Arc::new(Mutex::new(request::Context { origin: addr })),
+            context: Arc::new(Mutex::new(request::Context {
+                origin: origin.addr,
+            })),
         };
 
         self.inner.call(request)
+    }
+}
+
+impl BalanceLayer {
+    pub fn new(store: Arc<Store>) -> BalanceLayer {
+        BalanceLayer { store }
     }
 }
 
@@ -41,6 +60,9 @@ impl<S> Layer<S> for BalanceLayer {
     type Service = Balance<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Balance { inner }
+        Balance {
+            inner,
+            store: self.store.clone(),
+        }
     }
 }

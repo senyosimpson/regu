@@ -1,4 +1,5 @@
 mod balance;
+mod error;
 mod http;
 mod request;
 mod tcp;
