@@ -1,21 +1,13 @@
-mod proxy;
-use proxy::ProxyHttp;
+mod balance;
+mod http;
+mod request;
+mod tcp;
 
-use tokio::net::TcpListener;
-use tower::{Service, ServiceBuilder};
+mod regu;
+use regu::Regu;
 
 #[tokio::main]
 async fn main() {
-    let proxy = ProxyHttp {
-        backends: vec!["oom.senyosimpson.com".into()],
-    };
-
-    let listener = TcpListener::bind("0.0.0.0:8192").await.unwrap();
-    loop {
-        let (stream, _) = listener.accept().await.unwrap();
-        tokio::spawn(async move {
-            let service = ServiceBuilder::new().service(proxy);
-            service.call(stream);
-        });
-    }
+    let regu = Regu::new();
+    regu.run().await;
 }

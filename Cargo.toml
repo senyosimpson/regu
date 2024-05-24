@@ -8,5 +8,7 @@ edition = "2021"
 [dependencies]
 dns-lookup = "2.0.4"
 http = "1.1.0"
-tokio = { version = "1.37.0", features = ["rt-multi-thread", "net", "io-std", "io-util", "macros"] }
+rand = { version = "0.8.5", features = ["small_rng"] }
+serde = { version = "1.0.202", features = ["derive"] }
+tokio = { version = "1.37.0", features = ["rt-multi-thread", "net", "io-std", "io-util", "macros", "sync"] }
 tower = "0.4.13"
