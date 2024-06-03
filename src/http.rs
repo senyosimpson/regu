@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use http_body_util::combinators::BoxBody;
@@ -9,12 +10,18 @@ use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
 
 use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use tower::Service;
 
+use crate::regu::Store;
+use crate::request::Context as RequestCtx;
 use crate::{error::ProxyError, request::Request};
 
 pub struct HttpService;
-pub struct HttpProxyService;
+#[derive(Clone)]
+pub struct HttpProxyService {
+    context: Arc<Mutex<RequestCtx>>,
+}
 
 impl Service<Request> for HttpService {
     type Response = ();
@@ -29,7 +36,9 @@ impl Service<Request> for HttpService {
         let fut = async move {
             let client = TokioIo::new(req.client);
             tokio::task::spawn(async move {
-                let service = HttpProxyService;
+                let service = HttpProxyService {
+                    context: req.context.clone(),
+                };
                 let service = TowerToHyperService::new(service);
 
                 if let Err(err) = hyper::server::conn::http1::Builder::new()
@@ -48,7 +57,7 @@ impl Service<Request> for HttpService {
 }
 
 impl Service<hyper::Request<Incoming>> for HttpProxyService {
-    type Response = Result<http::Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>;
+    type Response = http::Response<BoxBody<Bytes, hyper::Error>>;
     type Error = ProxyError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -58,7 +67,7 @@ impl Service<hyper::Request<Incoming>> for HttpProxyService {
 
     fn call(&mut self, req: hyper::Request<Incoming>) -> Self::Future {
         let fut = async move {
-            let ctx = req.context.lock().await;
+            let ctx = self.context.lock().await;
             let origin_addr = ctx.origin;
             drop(ctx);
 
@@ -75,6 +84,7 @@ impl Service<hyper::Request<Incoming>> for HttpProxyService {
             });
 
             let mut res = sender.send_request(req).await.unwrap();
+            res
         };
 
         Box::pin(fut)

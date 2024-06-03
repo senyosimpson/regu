@@ -8,6 +8,7 @@ use tower::{Service, ServiceBuilder};
 
 use crate::balance::BalanceLayer;
 use crate::http::HttpService;
+use crate::request::Request;
 use crate::tcp::TcpService;
 
 /// The Regu TCP + HTTP proxy
@@ -93,6 +94,7 @@ impl Regu {
                             .layer(BalanceLayer::new(store))
                             .service(TcpService);
 
+                        let ctx = Request::new(stream, addr);
                         service.call((stream, addr)).await;
                         println!("serviced connection");
                     });

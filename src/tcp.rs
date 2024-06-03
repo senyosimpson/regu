@@ -10,12 +10,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tower::Service;
 
-use crate::error::ProxyError;
-use crate::request::Request;
+use crate::{
+    error::ProxyError,
+    request::{Request, TcpContext},
+};
 
 pub struct TcpService;
 
-impl Service<Request> for TcpService {
+impl Service<Request<TcpContext>> for TcpService {
     // TODO: In future, use a hyper Bytes? or use another generic that
     // implements Body
     type Response = ();
@@ -29,12 +31,13 @@ impl Service<Request> for TcpService {
     // If we know we're handling HTTP connections, maybe we can use hyper::serve_conn?
     // That way, we can get HTTP information we actually care about and then make some
     // moves from there
-    fn call(&mut self, req: Request) -> Self::Future {
+    fn call(&mut self, req: Request<TcpContext>) -> Self::Future {
         let fut = async move {
-            let ctx = req.context.lock().await;
-            let origin_addr = ctx.origin;
-            drop(ctx);
-            let origin = TcpStream::connect(origin_addr).await.unwrap();
+            // let origin_addr = {
+            //     let ctx = req.context.lock().await;
+            //     ctx.origin
+            // };
+            let origin = TcpStream::connect(req.state.origin.addr).await.unwrap();
 
             // We've got a request, we've connected to the upstream. Now we need to perform
             // the proxying logic.
