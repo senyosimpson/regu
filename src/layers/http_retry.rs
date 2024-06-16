@@ -66,10 +66,6 @@ impl<S> Layer<S> for HttpRetryLayer {
     }
 }
 
-/// `F` is the future, `R` and `E` are the response and error from the wrapped
-/// future `F`. The future `F` is bound the trait `Future<Output = Result<R, E>>`
-/// since it returns a result of that nature. Our `ResponseFuture` has the same
-/// output, since we return the output of the inner future.
 impl<F, E, B> Future for ResponseFuture<F>
 where
     F: Future<Output = Result<hyper::Response<B>, E>>,
