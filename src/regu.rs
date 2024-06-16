@@ -61,17 +61,6 @@ impl Regu {
         };
         apps.insert(ip, target);
 
-        let addr = "127.0.0.2:4096".parse().unwrap();
-        let origin = Origin {
-            addr,
-            rtt: Duration::from_millis(1),
-        };
-        let target = Target {
-            protocol: Protocol::Tcp,
-            origins: vec![origin],
-        };
-        apps.insert(ip, target);
-
         let store = Store { apps };
         Regu {
             store: Arc::new(store),
