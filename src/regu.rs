@@ -3,11 +3,13 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
+use hyper::server::conn::http1;
+use hyper_util::rt::TokioIo;
+use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
 use tower::{Service, ServiceBuilder};
 
-use crate::balance::BalanceLayer;
-use crate::http::HttpService;
+use crate::layers::{BalanceLayer, HttpRetryLayer, HttpService, HyperToReguRequestLayer};
 use crate::request::Request;
 use crate::tcp::TcpService;
 
@@ -22,13 +24,18 @@ pub struct Store {
 
 #[derive(Debug)]
 pub struct Target {
+    /// The protocol the target speaks. One of TCP, HTTP/1.1 or HTTP/2
     pub protocol: Protocol,
+    /// A collection of origins that services this target
     pub origins: Vec<Origin>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Origin {
+    /// The address of the origin server
     pub addr: SocketAddr,
+    /// The round-trip time to the origin server. Used as a deciding factor
+    /// during load balancing
     pub rtt: Duration,
 }
 
@@ -91,21 +98,30 @@ impl Regu {
                 Protocol::Tcp => {
                     tokio::spawn(async move {
                         let mut service = ServiceBuilder::new()
+                            // .layer(ReplayLayer::new(store))
                             .layer(BalanceLayer::new(store))
                             .service(TcpService);
 
-                        let ctx = Request::new(stream, addr);
-                        service.call((stream, addr)).await;
+                        let request = Request::new(addr, Some(stream));
+                        service.call(request).await;
                         println!("serviced connection");
                     });
                 }
                 Protocol::Http11 => {
                     tokio::spawn(async move {
-                        let mut service = ServiceBuilder::new()
+                        let service = ServiceBuilder::new()
+                            .layer(HyperToReguRequestLayer::new(addr))
                             .layer(BalanceLayer::new(store))
+                            .layer(HttpRetryLayer::new(5))
                             .service(HttpService);
 
-                        service.call((stream, addr)).await;
+                        let service = TowerToHyperService::new(service);
+                        let io = TokioIo::new(stream);
+                        let http = http1::Builder::new();
+                        let conn = http.serve_connection(io, service);
+                        if let Err(err) = conn.await {
+                            eprintln!("server error: {}", err);
+                        }
                         println!("serviced connection");
                     });
                 }

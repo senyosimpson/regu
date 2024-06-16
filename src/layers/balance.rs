@@ -7,8 +7,9 @@ use rand::SeedableRng;
 use tower::{Layer, Service};
 
 use crate::regu::Store;
-use crate::request::{BalanceContext, Request, TcpContext};
+use crate::request::Request;
 
+#[derive(Clone)]
 pub struct Balance<S> {
     inner: S,
     store: Arc<Store>,
@@ -18,9 +19,9 @@ pub struct BalanceLayer {
     store: Arc<Store>,
 }
 
-impl<S> Service<Request<BalanceContext>> for Balance<S>
+impl<S> Service<Request> for Balance<S>
 where
-    S: Service<Request<TcpContext>>,
+    S: Service<Request>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -30,12 +31,12 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: Request<BalanceContext>) -> Self::Future {
+    fn call(&mut self, mut request: Request) -> Self::Future {
         let target = self.store.apps.get(&request.peer.ip()).unwrap();
         let mut rng = SmallRng::from_entropy();
         let origin = target.origins.choose(&mut rng).unwrap();
 
-        let request = request.next(origin.addr);
+        request.state.insert(origin.clone());
         self.inner.call(request)
     }
 }

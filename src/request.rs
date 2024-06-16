@@ -1,56 +1,25 @@
 use std::net::SocketAddr;
-use std::time::Duration;
 
+use http::Extensions;
+use hyper::body::Incoming;
 use tokio::net::TcpStream;
 
-use crate::regu::Origin;
-
-/// A request to a service. It is parametrized by a context C which maps
-/// to each layer and the final service. The request changes from context
-/// to context as it passes through the middleware and finally through the
-/// service.
-pub struct Request<C> {
-    pub client: TcpStream,
+/// A request to a service. It contains an Extension type which can be used
+/// to store underlying state throughout the lifetime of a request.
+pub struct Request {
     pub peer: SocketAddr,
-    pub context: C,
+    pub client: Option<TcpStream>,
+    pub hyper_request: Option<hyper::Request<Incoming>>,
+    pub state: Extensions,
 }
 
-// ===== Contexts =====
-
-pub struct EntryContext;
-
-pub struct BalanceContext;
-
-pub struct TcpContext {
-    /// The chosen origin server we're proxying to
-    pub origin: Origin,
-}
-
-impl Request<EntryContext> {
-    pub fn new(client: TcpStream, peer: SocketAddr) -> Request<BalanceContext> {
+impl Request {
+    pub fn new(peer: SocketAddr, client: Option<TcpStream>) -> Request {
         Request {
             client,
             peer,
-            context: BalanceContext,
+            hyper_request: None,
+            state: Extensions::new(),
         }
     }
 }
-
-impl Request<BalanceContext> {
-    pub fn next(self, origin: SocketAddr) -> Request<TcpContext> {
-        let origin = Origin {
-            addr: origin,
-            rtt: Duration::from_millis(1),
-        };
-        let ctx = TcpContext { origin };
-
-        Request {
-            client: self.client,
-            peer: self.peer,
-            context: ctx,
-        }
-    }
-}
-
-// unsafe impl Send for Request {}
-// unsafe impl Sync for Request {}

@@ -1,23 +1,18 @@
-use std::{
-    error::Error,
-    fmt,
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tower::Service;
 
-use crate::{
-    error::ProxyError,
-    request::{Request, TcpContext},
-};
+use crate::error::ProxyError;
+use crate::regu::Origin;
+use crate::request::Request;
 
 pub struct TcpService;
 
-impl Service<Request<TcpContext>> for TcpService {
+impl Service<Request> for TcpService {
     // TODO: In future, use a hyper Bytes? or use another generic that
     // implements Body
     type Response = ();
@@ -28,22 +23,20 @@ impl Service<Request<TcpContext>> for TcpService {
         Poll::Ready(Ok(()))
     }
 
-    // If we know we're handling HTTP connections, maybe we can use hyper::serve_conn?
-    // That way, we can get HTTP information we actually care about and then make some
-    // moves from there
-    fn call(&mut self, req: Request<TcpContext>) -> Self::Future {
+    fn call(&mut self, mut request: Request) -> Self::Future {
         let fut = async move {
-            // let origin_addr = {
-            //     let ctx = req.context.lock().await;
-            //     ctx.origin
-            // };
-            let origin = TcpStream::connect(req.state.origin.addr).await.unwrap();
+            let origin = request.state.remove::<Origin>().unwrap();
+            let origin = TcpStream::connect(origin.addr).await.unwrap();
 
             // We've got a request, we've connected to the upstream. Now we need to perform
             // the proxying logic.
             // Read from client, write to origin
             // Read from origin, write to client
-            let (mut client_read, mut client_write) = req.client.into_split();
+            let client = match request.client {
+                Some(client) => client,
+                None => return Err(ProxyError::MissingRequest), // TODO: Fix
+            };
+            let (mut client_read, mut client_write) = client.into_split();
             let (mut origin_read, mut origin_write) = origin.into_split();
 
             let fut1 = tokio::spawn(async move {
@@ -73,17 +66,5 @@ impl Service<Request<TcpContext>> for TcpService {
         };
 
         Box::pin(fut)
-    }
-}
-
-impl Error for ProxyError {}
-
-impl fmt::Display for ProxyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ProxyError::Timeout => write!(f, "timed out"),
-            ProxyError::Connection => write!(f, "connection error"),
-            ProxyError::Http(_) => write!(f, "http error"),
-        }
     }
 }
