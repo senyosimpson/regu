@@ -9,6 +9,7 @@ use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
 use tower::{Service, ServiceBuilder};
 
+use crate::balance::RandomBalancer;
 use crate::layers::{BalanceLayer, HttpRetryLayer, HttpService, HyperToReguRequestLayer};
 use crate::request::Request;
 use crate::tcp::TcpService;
@@ -34,9 +35,11 @@ pub struct Target {
 pub struct Origin {
     /// The address of the origin server
     pub addr: SocketAddr,
-    /// The round-trip time to the origin server. Used as a deciding factor
-    /// during load balancing
+    /// The last seen round-trip time to the origin server. Used as a deciding factor
+    /// during load balancing. Defaults to 1 second.
     pub rtt: Duration,
+    /// Current count of how many inflight requests are going to this origin
+    pub inflight: u32,
 }
 
 #[derive(Debug)]
@@ -53,7 +56,8 @@ impl Regu {
         let addr = "137.66.17.117:80".parse().unwrap();
         let origin = Origin {
             addr,
-            rtt: Duration::from_millis(2),
+            rtt: Duration::from_secs(1),
+            inflight: 0,
         };
         let target = Target {
             protocol: Protocol::Tcp,
@@ -88,7 +92,7 @@ impl Regu {
                     tokio::spawn(async move {
                         let mut service = ServiceBuilder::new()
                             // .layer(ReplayLayer::new(store))
-                            .layer(BalanceLayer::new(store))
+                            .layer(BalanceLayer::new(store, RandomBalancer::new()))
                             .service(TcpService);
 
                         let request = Request::new(addr, Some(stream));
@@ -100,7 +104,7 @@ impl Regu {
                     tokio::spawn(async move {
                         let service = ServiceBuilder::new()
                             .layer(HyperToReguRequestLayer::new(addr))
-                            .layer(BalanceLayer::new(store))
+                            .layer(BalanceLayer::new(store, RandomBalancer::new()))
                             .layer(HttpRetryLayer::new(5))
                             .service(HttpService);
 

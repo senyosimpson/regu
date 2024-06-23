@@ -1,27 +1,28 @@
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use rand::rngs::SmallRng;
-use rand::seq::SliceRandom;
-use rand::SeedableRng;
 use tower::{Layer, Service};
 
+use crate::balance::Balancer;
 use crate::regu::Store;
 use crate::request::Request;
 
 #[derive(Clone)]
-pub struct Balance<S> {
+pub struct Balance<S, B> {
     inner: S,
+    balancer: B,
     store: Arc<Store>,
 }
 
-pub struct BalanceLayer {
+pub struct BalanceLayer<B> {
     store: Arc<Store>,
+    balancer: B,
 }
 
-impl<S> Service<Request> for Balance<S>
+impl<S, B> Service<Request> for Balance<S, B>
 where
     S: Service<Request>,
+    B: Balancer,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -33,27 +34,27 @@ where
 
     fn call(&mut self, mut request: Request) -> Self::Future {
         let target = self.store.apps.get(&request.peer.ip()).unwrap();
-        let mut rng = SmallRng::from_entropy();
-        let origin = target.origins.choose(&mut rng).unwrap();
+        let origin = self.balancer.balance(&target.origins);
 
         request.state.insert(origin.clone());
         self.inner.call(request)
     }
 }
 
-impl BalanceLayer {
-    pub fn new(store: Arc<Store>) -> BalanceLayer {
-        BalanceLayer { store }
+impl<B> BalanceLayer<B> {
+    pub fn new(store: Arc<Store>, balancer: B) -> BalanceLayer<B> {
+        BalanceLayer { store, balancer }
     }
 }
 
-impl<S> Layer<S> for BalanceLayer {
-    type Service = Balance<S>;
+impl<S, B: Balancer> Layer<S> for BalanceLayer<B> {
+    type Service = Balance<S, B>;
 
     fn layer(&self, inner: S) -> Self::Service {
         Balance {
             inner,
             store: self.store.clone(),
+            balancer: self.balancer.clone(),
         }
     }
 }
