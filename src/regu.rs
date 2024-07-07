@@ -1,71 +1,28 @@
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
 
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
-use tower::{Service, ServiceBuilder};
+use tower::{Service, ServiceBuilder, ServiceExt};
 
 use crate::balance::RandomBalancer;
+use crate::core::{Protocol, Store};
 use crate::layers::{BalanceLayer, HttpRetryLayer, HttpService, HyperToReguRequestLayer};
+use crate::load::Load;
 use crate::request::Request;
 use crate::tcp::TcpService;
 
 /// The Regu TCP + HTTP proxy
-pub struct Regu {
-    store: Arc<Store>,
+pub struct Regu<T> {
+    store: Arc<Store<T>>,
 }
 
-pub struct Store {
-    pub apps: HashMap<IpAddr, Target>,
-}
-
-#[derive(Debug)]
-pub struct Target {
-    /// The protocol the target speaks. One of TCP, HTTP/1.1 or HTTP/2
-    pub protocol: Protocol,
-    /// A collection of origins that services this target
-    pub origins: Vec<Origin>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Origin {
-    /// The address of the origin server
-    pub addr: SocketAddr,
-    /// The last seen round-trip time to the origin server. Used as a deciding factor
-    /// during load balancing. Defaults to 1 second.
-    pub rtt: Duration,
-    /// Current count of how many inflight requests are going to this origin
-    pub inflight: u32,
-}
-
-#[derive(Debug)]
-pub enum Protocol {
-    Tcp,
-    Http11,
-    Http2,
-}
-
-impl Regu {
-    pub fn new() -> Regu {
-        let mut apps = HashMap::new();
-        let ip = "127.0.0.1".parse().unwrap();
-        let addr = "137.66.17.117:80".parse().unwrap();
-        let origin = Origin {
-            addr,
-            rtt: Duration::from_secs(1),
-            inflight: 0,
-        };
-        let target = Target {
-            protocol: Protocol::Tcp,
-            origins: vec![origin],
-        };
-        apps.insert(ip, target);
-
-        let store = Store { apps };
+impl<T> Regu<T>
+where
+    T: Load + Clone + Sync + Send + 'static,
+{
+    pub fn new(store: Store<T>) -> Regu<T> {
         Regu {
             store: Arc::new(store),
         }
@@ -81,7 +38,7 @@ impl Regu {
             let target = match self.store.apps.get(&addr.ip()) {
                 None => continue,
                 Some(target) => {
-                    println!("found target: {:#?}", target);
+                    // println!("found target: {:#?}", target);
                     target
                 }
             };
@@ -96,7 +53,7 @@ impl Regu {
                             .service(TcpService);
 
                         let request = Request::new(addr, Some(stream));
-                        service.call(request).await;
+                        let _ = service.ready().await.unwrap().call(request).await;
                         println!("serviced connection");
                     });
                 }
@@ -115,7 +72,6 @@ impl Regu {
                         if let Err(err) = conn.await {
                             eprintln!("server error: {}", err);
                         }
-                        println!("serviced connection");
                     });
                 }
                 Protocol::Http2 => unreachable!(),

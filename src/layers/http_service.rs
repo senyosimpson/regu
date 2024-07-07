@@ -3,12 +3,14 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use hyper::body::Incoming;
+use hyper::client::conn::http1;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 use tower::Service;
 
+use crate::core::Origin;
 use crate::error::ProxyError;
-use crate::regu::Origin;
+use crate::load::inflight::Inflight;
 use crate::request::Request;
 
 #[derive(Clone)]
@@ -24,12 +26,12 @@ impl Service<Request> for HttpService {
     }
 
     fn call(&mut self, mut request: Request) -> Self::Future {
-        let origin = request.state.remove::<Origin>().unwrap();
+        let origin = request.state.remove::<Inflight<Origin>>().unwrap();
         let fut = async move {
             let stream = TcpStream::connect(origin.addr).await.unwrap();
             let origin = TokioIo::new(stream);
 
-            let (mut sender, conn) = hyper::client::conn::http1::handshake(origin).await.unwrap();
+            let (mut sender, conn) = http1::handshake(origin).await.unwrap();
 
             // Polls the connection
             tokio::task::spawn(async move {

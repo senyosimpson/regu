@@ -6,8 +6,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tower::Service;
 
+use crate::core::Origin;
 use crate::error::ProxyError;
-use crate::regu::Origin;
 use crate::request::Request;
 
 pub struct TcpService;

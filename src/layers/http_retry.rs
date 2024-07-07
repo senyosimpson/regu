@@ -37,10 +37,10 @@ where
     type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+        self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: Request) -> Self::Future {
+    fn call(&mut self, request: Request) -> Self::Future {
         let f = self.inner.call(request);
         ResponseFuture {
             future: f,
